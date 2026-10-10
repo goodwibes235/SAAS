@@ -107,7 +107,7 @@ export default function WorkflowSection() {
             });
           },
         });
-      }, sectionRef);
+      });
     }
 
     initGSAP().catch(console.error);

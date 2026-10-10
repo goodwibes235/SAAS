@@ -21,62 +21,69 @@ export default function SmoothScrollProvider({ children }: SmoothScrollProviderP
     }
 
     let isCancelled = false;
+    let registeredTicker: ((time: number) => void) | null = null;
+    let localGsap: (typeof import("gsap"))["gsap"] | null = null;
 
     async function initLenis() {
-      const { default: Lenis } = await import("lenis");
-      const { gsap } = await import("gsap");
-      const { ScrollTrigger } = await import("gsap/ScrollTrigger");
+      try {
+        const { default: Lenis } = await import("lenis");
+        const { gsap } = await import("gsap");
+        const { ScrollTrigger } = await import("gsap/ScrollTrigger");
 
-      if (isCancelled) return;
+        if (isCancelled) return;
+        localGsap = gsap;
 
-      gsap.registerPlugin(ScrollTrigger);
+        gsap.registerPlugin(ScrollTrigger);
 
-      const lenis = new Lenis({
-        duration: 1.1,
-        easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-        orientation: "vertical",
-        gestureOrientation: "vertical",
-        smoothWheel: true,
-        wheelMultiplier: 0.9,
-        touchMultiplier: 1.2,
-      });
+        const lenis = new Lenis({
+          duration: 1.1,
+          easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
+          orientation: "vertical",
+          gestureOrientation: "vertical",
+          smoothWheel: true,
+          wheelMultiplier: 0.9,
+          touchMultiplier: 1.2,
+          autoRaf: false,
+        });
 
-      lenisRef.current = lenis;
+        lenisRef.current = lenis;
 
-      // Update ScrollTrigger on Lenis scroll
-      lenis.on("scroll", ScrollTrigger.update);
+        // Update ScrollTrigger on Lenis scroll
+        lenis.on("scroll", ScrollTrigger.update);
 
-      // Connect Lenis RAF to GSAP ticker
-      const updateGsapTicker = (time: number) => {
-        lenis.raf(time * 1000);
-      };
-      tickerFnRef.current = updateGsapTicker;
+        // Connect Lenis RAF to GSAP ticker safely
+        const updateGsapTicker = (time: number) => {
+          if (lenisRef.current) {
+            lenisRef.current.raf(time * 1000);
+          }
+        };
+        registeredTicker = updateGsapTicker;
+        tickerFnRef.current = updateGsapTicker;
 
-      gsap.ticker.add(updateGsapTicker);
-      gsap.ticker.lagSmoothing(0);
+        gsap.ticker.add(updateGsapTicker);
+        gsap.ticker.lagSmoothing(500, 33);
 
-      // Refresh ScrollTrigger once DOM layout is settled
-      requestAnimationFrame(() => {
-        ScrollTrigger.refresh();
-      });
+        // Refresh ScrollTrigger once DOM layout is settled
+        requestAnimationFrame(() => {
+          ScrollTrigger.refresh();
+        });
+      } catch (err) {
+        console.warn("Smooth scroll initialization fallback to native:", err);
+      }
     }
 
     initLenis();
 
     return () => {
       isCancelled = true;
+      if (localGsap && registeredTicker) {
+        localGsap.ticker.remove(registeredTicker);
+      }
       if (lenisRef.current) {
         lenisRef.current.destroy();
         lenisRef.current = null;
       }
-      if (tickerFnRef.current) {
-        import("gsap").then(({ gsap }) => {
-          if (tickerFnRef.current) {
-            gsap.ticker.remove(tickerFnRef.current);
-            tickerFnRef.current = null;
-          }
-        });
-      }
+      tickerFnRef.current = null;
     };
   }, []);
 
